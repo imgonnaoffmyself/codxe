@@ -218,19 +218,207 @@ void Scr_BotMirror(scr_entref_t entref)
     g_botai[entref.entnum].mirror_client_num = clientNum;
 }
 
-static char s_pendingBotName[32];
+struct BotNameEntry
+{
+    std::string name;
+    std::string clanTag;
+};
 
-// Intercept SV_UserinfoChanged when called from SV_DirectConnect for a bot
-// connecting (NA_BOT type, CS_CONNECTED state). At this point cl->userinfo
-// has the raw connect string; we patch the "name" key before SV_UserinfoChanged
-// reads it so the correct name propagates through SV_ClientEnterWorld and the
-// subsequent SV_SetConfigstring broadcast to all clients.
+static std::string Trim(const std::string &str)
+{
+    const size_t first = str.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos)
+        return "";
+    const size_t last = str.find_last_not_of(" \t\r\n");
+    return str.substr(first, (last - first + 1));
+}
+
+static const char *Info_ValueForKey(const char *s, const char *key)
+{
+    static char value[2][512];
+    static int valueIndex = 0;
+    valueIndex ^= 1;
+    char *outVal = value[valueIndex];
+    outVal[0] = '\0';
+
+    if (!s || !key || !*s || !*key)
+        return "";
+
+    const char *p = s;
+    size_t keyLen = strlen(key);
+
+    while (*p)
+    {
+        if (*p == '\\')
+            p++;
+        const char *kStart = p;
+        while (*p && *p != '\\')
+            p++;
+        size_t curKeyLen = p - kStart;
+        if (*p == '\\')
+            p++;
+        const char *vStart = p;
+        while (*p && *p != '\\')
+            p++;
+        size_t curValLen = p - vStart;
+
+        if (curKeyLen == keyLen && _strnicmp(kStart, key, keyLen) == 0)
+        {
+            size_t copyLen = curValLen < 511 ? curValLen : 511;
+            memcpy(outVal, vStart, copyLen);
+            outVal[copyLen] = '\0';
+            return outVal;
+        }
+    }
+    return "";
+}
+
+static bool IsUsernameInUse(const std::string &name, int excludeClientNum = -1)
+{
+    for (int i = 0; i < MAX_CLIENTS; ++i)
+    {
+        if (i == excludeClientNum)
+            continue;
+
+        client_t *cl = &svsHeader->clients[i];
+        if (cl->header.state != CON_DISCONNECTED)
+        {
+            if (_stricmp(cl->name, name.c_str()) == 0)
+                return true;
+
+            const char *userinfoName = Info_ValueForKey(cl->userinfo, "name");
+            if (userinfoName && _stricmp(userinfoName, name.c_str()) == 0)
+                return true;
+
+            if (g_clients && _stricmp(g_clients[i].sess.cs.name, name.c_str()) == 0)
+                return true;
+        }
+    }
+    return false;
+}
+
+static std::vector<BotNameEntry> LoadBotEntries()
+{
+    std::vector<BotNameEntry> entries;
+    std::string path = Config::ResolveDataPath("bots.txt");
+    if (path.empty() || !filesystem::FileExists(path.c_str()))
+    {
+        path = "game:\\_codxe\\bots.txt";
+    }
+
+    std::string content;
+    if (!ReadFileToString(path.c_str(), content))
+    {
+        return entries;
+    }
+
+    std::stringstream ss(content);
+    std::string line;
+    while (std::getline(ss, line))
+    {
+        line = Trim(line);
+        if (line.empty() || line[0] == '#' || (line.size() >= 2 && line[0] == '/' && line[1] == '/'))
+            continue;
+
+        BotNameEntry entry;
+        size_t commaPos = line.find(',');
+        if (commaPos != std::string::npos)
+        {
+            entry.name = Trim(line.substr(0, commaPos));
+            entry.clanTag = Trim(line.substr(commaPos + 1));
+        }
+        else
+        {
+            entry.name = line;
+            entry.clanTag = "";
+        }
+
+        if (!entry.name.empty())
+        {
+            char cleanName[32];
+            int j = 0;
+            for (size_t i = 0; i < entry.name.size() && j < (int)sizeof(cleanName) - 1; ++i)
+            {
+                if ((unsigned char)entry.name[i] >= 0x20)
+                {
+                    cleanName[j++] = entry.name[i];
+                }
+            }
+            cleanName[j] = '\0';
+            entry.name = cleanName;
+
+            if (!entry.clanTag.empty())
+            {
+                char cleanTag[8];
+                j = 0;
+                for (size_t i = 0; i < entry.clanTag.size() && j < (int)sizeof(cleanTag) - 1; ++i)
+                {
+                    if ((unsigned char)entry.clanTag[i] >= 0x20)
+                    {
+                        cleanTag[j++] = entry.clanTag[i];
+                    }
+                }
+                cleanTag[j] = '\0';
+                entry.clanTag = cleanTag;
+            }
+
+            if (!entry.name.empty())
+            {
+                entries.push_back(entry);
+            }
+        }
+    }
+    return entries;
+}
+
+static bool PickVacantBotEntry(BotNameEntry &outEntry, int excludeClientNum = -1)
+{
+    std::vector<BotNameEntry> allEntries = LoadBotEntries();
+    if (allEntries.empty())
+        return false;
+
+    std::vector<BotNameEntry> vacantEntries;
+    for (size_t i = 0; i < allEntries.size(); ++i)
+    {
+        const BotNameEntry &entry = allEntries[i];
+        if (!IsUsernameInUse(entry.name, excludeClientNum))
+        {
+            vacantEntries.push_back(entry);
+        }
+    }
+
+    if (vacantEntries.empty())
+        return false;
+
+    static bool s_seeded = false;
+    if (!s_seeded)
+    {
+        srand(GetTickCount());
+        s_seeded = true;
+    }
+
+    int randomIndex = rand() % vacantEntries.size();
+    outEntry = vacantEntries[randomIndex];
+    return true;
+}
+
+static char s_pendingBotName[32];
+static char s_pendingClanTag[8];
+
 Detour SV_UserinfoChanged_Detour;
 void SV_UserinfoChanged_Hook(client_t *cl)
 {
-    if (s_pendingBotName[0] && cl->header.netchan.remoteAddress.type == NA_BOT && cl->header.state == CS_CONNECTED)
+    if (cl->header.netchan.remoteAddress.type == NA_BOT && cl->header.state == CS_CONNECTED)
     {
-        Info_SetValueForKey(cl->userinfo, "name", s_pendingBotName);
+        if (s_pendingBotName[0])
+        {
+            Info_SetValueForKey(cl->userinfo, "name", s_pendingBotName);
+        }
+        if (s_pendingClanTag[0])
+        {
+            Info_SetValueForKey(cl->userinfo, "clanAbbrev", s_pendingClanTag);
+            Info_SetValueForKey(cl->userinfo, "clantag", s_pendingClanTag);
+        }
     }
 
     SV_UserinfoChanged_Detour.GetOriginal<SV_UserinfoChanged_t>()(cl);
@@ -238,18 +426,25 @@ void SV_UserinfoChanged_Hook(client_t *cl)
 
 void GScr_AddTestClient()
 {
+    s_pendingBotName[0] = '\0';
+    s_pendingClanTag[0] = '\0';
+
     if (Scr_GetNumParam() == 1)
     {
         const char *string = Scr_GetString(0);
+        std::string rawStr = string ? string : "";
 
-        // Strip non-printable chars, matching name field size (32 bytes = 31 chars + null)
+        size_t commaPos = rawStr.find(',');
+        std::string nameStr = (commaPos != std::string::npos) ? rawStr.substr(0, commaPos) : rawStr;
+        std::string clanStr = (commaPos != std::string::npos) ? rawStr.substr(commaPos + 1) : "";
+
         char name[32];
         int i, j;
-        for (i = 0, j = 0; string[i] && j < (int)sizeof(name) - 1; ++i)
+        for (i = 0, j = 0; nameStr[i] && j < (int)sizeof(name) - 1; ++i)
         {
-            if ((unsigned char)string[i] >= 0x20)
+            if ((unsigned char)nameStr[i] >= 0x20)
             {
-                name[j] = string[i];
+                name[j] = nameStr[i];
                 ++j;
             }
         }
@@ -260,10 +455,50 @@ void GScr_AddTestClient()
 
         strncpy(s_pendingBotName, name, sizeof(s_pendingBotName) - 1);
         s_pendingBotName[sizeof(s_pendingBotName) - 1] = '\0';
+
+        if (!clanStr.empty())
+        {
+            char tag[8];
+            for (i = 0, j = 0; clanStr[i] && j < (int)sizeof(tag) - 1; ++i)
+            {
+                if ((unsigned char)clanStr[i] >= 0x20)
+                {
+                    tag[j] = clanStr[i];
+                    ++j;
+                }
+            }
+            tag[j] = '\0';
+            strncpy(s_pendingClanTag, tag, sizeof(s_pendingClanTag) - 1);
+            s_pendingClanTag[sizeof(s_pendingClanTag) - 1] = '\0';
+        }
+    }
+    else
+    {
+        BotNameEntry entry;
+        if (PickVacantBotEntry(entry))
+        {
+            strncpy(s_pendingBotName, entry.name.c_str(), sizeof(s_pendingBotName) - 1);
+            s_pendingBotName[sizeof(s_pendingBotName) - 1] = '\0';
+
+            if (!entry.clanTag.empty())
+            {
+                strncpy(s_pendingClanTag, entry.clanTag.c_str(), sizeof(s_pendingClanTag) - 1);
+                s_pendingClanTag[sizeof(s_pendingClanTag) - 1] = '\0';
+            }
+        }
     }
 
     gentity_s *ent = SV_AddTestClient();
+
+    if (ent && ent->client && s_pendingClanTag[0])
+    {
+        strncpy(ent->client->sess.cs.clanAbbrev, s_pendingClanTag, sizeof(ent->client->sess.cs.clanAbbrev) - 1);
+        ent->client->sess.cs.clanAbbrev[sizeof(ent->client->sess.cs.clanAbbrev) - 1] = '\0';
+        ClientUserinfoChanged(ent->s.number);
+    }
+
     s_pendingBotName[0] = '\0';
+    s_pendingClanTag[0] = '\0';
 
     if (ent)
         Scr_AddEntityNum(ent->s.number, 0);
@@ -356,6 +591,7 @@ sv_bots::~sv_bots()
 
     CleanBotArray();
     s_pendingBotName[0] = '\0';
+    s_pendingClanTag[0] = '\0';
 }
 } // namespace mp
 } // namespace iw3

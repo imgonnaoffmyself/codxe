@@ -10,12 +10,12 @@ inline const char *GetBrandingString()
 
     if (Config::GetActiveMod()[0] == '\0')
     {
-        _snprintf_s(brandingBuffer, sizeof(brandingBuffer), "CoD ^2Xe^7 %s", GIT_VERSION);
+        _snprintf_s(brandingBuffer, sizeof(brandingBuffer),
+                    "IW3C6 - v1.0.0\n^1SCRIPTS ARE INACTIVE!^7\nPlease make sure IW3C6 is installed correctly");
     }
     else
     {
-        _snprintf_s(brandingBuffer, sizeof(brandingBuffer), "CoD ^2Xe^7 %s\nMod: %s", GIT_VERSION,
-                    Config::GetActiveMod());
+        _snprintf_s(brandingBuffer, sizeof(brandingBuffer), "IW3C6 - v1.0.0");
     }
 
     return brandingBuffer;

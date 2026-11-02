@@ -41,9 +41,47 @@ void ClientScr_GetBotStatus(gclient_s *pSelf, const client_fields_s *pField)
     Scr_AddInt(cl->header.netchan.remoteAddress.type == NA_BOT);
 }
 
+void ClientScr_SetName(gclient_s *pSelf, const client_fields_s *pField)
+{
+    const char *name = Scr_GetString(0);
+    strncpy(pSelf->sess.cs.name, name, sizeof(pSelf->sess.cs.name) - 1);
+    pSelf->sess.cs.name[sizeof(pSelf->sess.cs.name) - 1] = '\0';
+    strncpy(pSelf->sess.newnetname, name, sizeof(pSelf->sess.newnetname) - 1);
+    pSelf->sess.newnetname[sizeof(pSelf->sess.newnetname) - 1] = '\0';
+
+    int clientNum = pSelf - g_clients;
+    if (clientNum >= 0 && clientNum < 18)
+    {
+        strncpy(svsHeader->clients[clientNum].name, name, sizeof(svsHeader->clients[clientNum].name) - 1);
+        svsHeader->clients[clientNum].name[sizeof(svsHeader->clients[clientNum].name) - 1] = '\0';
+        Info_SetValueForKey(svsHeader->clients[clientNum].userinfo, "name", name);
+        ClientUserinfoChanged(clientNum);
+    }
+}
+
+void ClientScr_GetClanAbbrev(gclient_s *pSelf, const client_fields_s *field)
+{
+    Scr_AddString(pSelf->sess.cs.clanAbbrev);
+}
+
+void ClientScr_SetClanAbbrev(gclient_s *pSelf, const client_fields_s *pField)
+{
+    const char *tag = Scr_GetString(0);
+    strncpy(pSelf->sess.cs.clanAbbrev, tag, sizeof(pSelf->sess.cs.clanAbbrev) - 1);
+    pSelf->sess.cs.clanAbbrev[sizeof(pSelf->sess.cs.clanAbbrev) - 1] = '\0';
+
+    int clientNum = pSelf - g_clients;
+    if (clientNum >= 0 && clientNum < 18)
+    {
+        Info_SetValueForKey(svsHeader->clients[clientNum].userinfo, "clanAbbrev", tag);
+        Info_SetValueForKey(svsHeader->clients[clientNum].userinfo, "clantag", tag);
+        ClientUserinfoChanged(clientNum);
+    }
+}
+
 client_fields_s client_fields_extended[] = {
     // Original fields
-    {"name", 0, F_LSTRING, ClientScr_ReadOnly, ClientScr_GetName},
+    {"name", 0, F_LSTRING, ClientScr_SetName, ClientScr_GetName},
     {"sessionteam", 0, F_STRING, ClientScr_SetSessionTeam, ClientScr_GetSessionTeam},
     {"sessionstate", 0, F_STRING, ClientScr_SetSessionState, ClientScr_GetSessionState},
     {"maxhealth", 12284, F_INT, ClientScr_SetMaxHealth, nullptr},
@@ -68,6 +106,8 @@ client_fields_s client_fields_extended[] = {
     {"forwardmove", NULL, F_INT, ClientScr_ReadOnly, ClientScr_GetForwardMove},
     {"rightmove", NULL, F_INT, ClientScr_ReadOnly, ClientScr_GetRightMove},
     {"isbot", 0, F_INT, ClientScr_ReadOnly, ClientScr_GetBotStatus},
+    {"clanabbrev", NULL, F_STRING, ClientScr_SetClanAbbrev, ClientScr_GetClanAbbrev},
+    {"clantag", NULL, F_STRING, ClientScr_SetClanAbbrev, ClientScr_GetClanAbbrev},
 
     {nullptr, 0, F_INT, nullptr, nullptr}};
 

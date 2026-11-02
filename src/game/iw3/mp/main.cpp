@@ -37,6 +37,7 @@ IW3_MP_Plugin::IW3_MP_Plugin()
     *(volatile uint8_t *)0x821FB069 = 0xE1;
 
     // Special modules need to be registered first
+    RegisterModule(new Config());
     RegisterModule(new Patches());
     RegisterModule(new Events());
     RegisterModule(new command());

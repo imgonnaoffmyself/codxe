@@ -65,21 +65,44 @@ ModList::ModList()
 
 void ModList::OnDvarInit()
 {
-    fs_game = Dvar_RegisterString("fs_game", "", DVAR_ARCHIVE, "The active mod directory");
+    const char *configuredMod = Config::GetActiveMod();
+    std::string defaultFsGame = "";
+    if (configuredMod && *configuredMod && IsSafeModName(configuredMod))
+    {
+        defaultFsGame = BuildFsGame(configuredMod);
+    }
+
+    fs_game = Dvar_RegisterString("fs_game", defaultFsGame.c_str(), DVAR_ARCHIVE, "The active mod directory");
+
+    if (!defaultFsGame.empty())
+    {
+        Dvar_SetStringFromSource(fs_game, defaultFsGame.c_str(), DVAR_SOURCE_INTERNAL);
+        DbgPrint("[codxe][IW3][ModList] Automatically activated mod from config: %s\n", defaultFsGame.c_str());
+        Cbuf_AddText(0, "exec mod.cfg\n");
+    }
 }
 
 std::string ModList::GetActiveName()
 {
-    if (!fs_game || !fs_game->current.string)
-        return std::string();
+    if (fs_game && fs_game->current.string && *fs_game->current.string)
+    {
+        const char *value = fs_game->current.string;
+        const size_t prefixLength = std::strlen(FS_GAME_PREFIX);
+        if (I_strnicmp(value, FS_GAME_PREFIX, static_cast<int>(prefixLength)) == 0)
+        {
+            const char *name = value + prefixLength;
+            if (IsSafeModName(name))
+                return name;
+        }
+    }
 
-    const char *value = fs_game->current.string;
-    const size_t prefixLength = std::strlen(FS_GAME_PREFIX);
-    if (I_strnicmp(value, FS_GAME_PREFIX, static_cast<int>(prefixLength)) != 0)
-        return std::string();
+    const char *configuredMod = Config::GetActiveMod();
+    if (configuredMod && *configuredMod && IsSafeModName(configuredMod))
+    {
+        return configuredMod;
+    }
 
-    const char *name = value + prefixLength;
-    return IsSafeModName(name) ? name : std::string();
+    return std::string();
 }
 
 std::string ModList::GetActivePath()
