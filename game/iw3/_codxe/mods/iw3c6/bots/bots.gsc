@@ -145,8 +145,8 @@ bots_declareDvars()
 		setDvar("bots_play_fakeAnims", true);//
 	if(getDvar("bots_play_throwback") == "")
 		setDvar("bots_play_throwback", true);//
-	if(getDvar("bots_play_footsounds") == "")
-		setDvar("bots_play_footsounds", true);//
+	// Real player movement emits engine footsteps; disable the legacy synthetic layer by default.
+	setDvar("bots_play_footsounds", false);
 	
 	if(getDvar("bots_main_experience") == "")
 		setDvar("bots_main_experience", -2);//experience, -1 is always random, -2 is near host if offline

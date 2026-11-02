@@ -719,7 +719,7 @@ AddOptions()
 		_temp = "true";
 	else
 		_temp = "false";
-	self AddMenu("set1", 14, "Toggle bots footsounds: "+_temp, ::bot_func, "foot", _tempDvar);
+	self AddMenu("set1", 14, "Toggle extra scripted footsteps: "+_temp, ::bot_func, "foot", _tempDvar);
 	
 	//
 	
@@ -1495,7 +1495,7 @@ bot_func(a, b)
 		break;
 		case "foot":
 			setDvar("bots_play_footsounds", !b);
-			self iPrintln("Bots will use fake footsounds: " + !b);
+			self iPrintln("Bots will add synthetic footsteps: " + !b);
 		break;
 		case "loadout":
 			switch(b)
