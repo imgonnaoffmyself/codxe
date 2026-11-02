@@ -1169,6 +1169,8 @@ bots_doBotSpawn()
 	self freezecontrols(true);
 	
 	wait self.pers["bots"]["skill"]["spawnWait"];
+	// Bots now move through real usercmd input, so unfreeze controls once active.
+	self freezeControls(false);
 
 	if(self.pers["bots"]["trait"]["asshole"] && self.pers["bots"]["trait"]["asshole_type"] == 2)
 		self setMoveSpeedScale(1.2);
