@@ -1784,90 +1784,51 @@ bots_Move(vMoveTarget, climbing)
 	if(climbing)
 	{
 		if(!self bots_CanClimb())
+		{
+			self botStop();
 			return;
+		}
 		
 		self thread bots_doClimbing();
-		moveTarget = vMoveTarget;
+		self.bots_doing = "climb";
+		if(!isDefined(self.lastStand))
+			self.bots_stance = "stand";
+		// Let the game handle ladder/jump movement instead of advancing the player origin.
+		self botAction("+gostand");
+		self botAction("+activate");
 	}
 	else
-		moveTarget = (vMoveTarget[0], vMoveTarget[1], self.origin[2]);
+	{
+		self botAction("-gostand");
+		self botAction("-activate");
+	}
 	
 	for(;;)
 	{
-		if(!climbing)
+		if(climbing && !self bots_CanClimb())
 		{
-			self bots_ClampToGround();
-			moveTarget = (vMoveTarget[0], vMoveTarget[1], self.origin[2]);
-		}
-		else
-		{
-			self.bots_doing = "climb";
-			if(self bots\bots_aim::bots_CanStopShoot())
-				self botStop();
-			if(!isDefined(self.lastStand))
-				self.bots_stance = "stand";
-		}
-		
-		didMakeIt = (DistanceSquared(moveTarget, self.origin) <= (self.bots_fMoveSpeed*self.bots_fMoveSpeed));
-		if(self.bots_fMoveSpeed < 0.05 || didMakeIt || (climbing && !self bots_CanClimb()))
-		{
-			if(didMakeIt)
-				self setOrigin(moveTarget);
-			
 			self botStop();
 			self notify( "BotMovementComplete" );
 		}
+
+		// botMoveTo feeds the server's usercmd movement path, preserving collision and physics.
+		// It reports "movedone" when the horizontal destination has been reached.
+		if(climbing)
+			moveTarget = vMoveTarget;
 		else
-		{
-			//move
-			self SetOrigin(self.origin + (VectorNormalize(moveTarget-self.origin) * (self.bots_fMoveSpeed)));
-			self bots_PushOutOfPlayers();
-		}
+			moveTarget = (vMoveTarget[0], vMoveTarget[1], self.origin[2]);
+		self botMoveTo(moveTarget);
+		self waittill("movedone");
 		
+		// Climb waypoints can share an XY position but differ in height. Keep the
+		// climb input active until the player has physically reached the waypoint.
+		if(!climbing || DistanceSquared(vMoveTarget, self.origin) <= 1024)
+		{
+			self botStop();
+			self notify( "BotMovementComplete" );
+		}
 		wait 0.05;
 	}
-}
-
-bots_PushOutOfPlayers()
-{
-	if(level.bots_varPlayOFMW <= 0.0)
-		return;
-	
-	for(i = 0; i < level.players.size; i++)
-	{
-		player = level.players[i];
-		
-		if(player == self)
-			continue;
-		if(!isAlive(player))
-			continue;
-
-		_distance = distance(player.origin, self.origin);
-			
-		if(_distance < level.bots_varPlayOFMW) //push out
-		{
-			pushOutDir = VectorNormalize((self.origin[0], self.origin[1], 0)-(player.origin[0], player.origin[1], 0));
-			trace = bulletTrace(self.origin + (0,0,20), (self.origin + (0,0,20)) + (pushOutDir * ((level.bots_varPlayOFMW-_distance)+10)), false, self);
-			//no collision, so push out
-			if(trace["fraction"] == 1)
-			{
-				pushoutPos = self.origin + (pushOutDir * (level.bots_varPlayOFMW-_distance));
-				self SetOrigin((pushoutPos[0], pushoutPos[1], self.origin[2])); 
-			}
-		}
-	}
-}
-
-bots_ClampToGround()
-{
-	trace = physicsTrace(self.origin + (0.0,0.0,50.0), self.origin + (0.0,0.0,-40.0));
-
-	if((trace[2] - (self.origin[2]-40.0)) > 0.0 && ((self.origin[2]+50.0) - trace[2]) > 0.0)
-	{
-		self SetOrigin(trace);
-		return true;
-	}
-	return false;
 }
 
 bots_followDynWaypointsGoal()
@@ -1949,8 +1910,6 @@ bots_doMovement()
 			//pick next waypoint or end
 			if(distToWp <= level.bots_objNear)
 			{
-				if(abs(self.bots_tempwp[2] - self.origin[2]) > 50 && !willClimb)
-					self setOrigin((self.origin[0], self.origin[1], self.bots_tempwp[2]));
 				
 				//get waypoint nearest our target
 				if(!isDefined(self.bots_vObjectivePos))
