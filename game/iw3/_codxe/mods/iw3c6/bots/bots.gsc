@@ -342,8 +342,16 @@ bots_watchBots()
 	fillSpec = getDVarInt("bots_manage_fill_spec");
 	fillMode = getDVarInt("bots_manage_fill_mode");
 	
-	if (level.rankedMatch) // this is a public online game, fill all empty slots with bots (bots will automatically leave to make room for real players)
-		fillAmount = 18;
+	if (level.rankedMatch) // public online host: honor the host-local pregame lobby simulation when enabled
+	{
+		if(getDvarInt("codxe_lobbybots_enabled"))
+		{
+			fillAmount = getDvarInt("codxe_lobbybots_target");
+			fillMode = 1; // count bots only; the simulated lobby count is a bot target
+		}
+		else
+			fillAmount = 18;
+	}
 	else if (!level.onlineGame && !level.splitScreen) // this is a LAN or system link game, fill with up to 8 bots to keep things interesting
 		fillAmount = 8;
 	else // this is either an online private game or a split screen game, these players likely don't want bots so we don't spawn any

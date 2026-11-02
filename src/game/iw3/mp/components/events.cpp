@@ -10,6 +10,7 @@
 #include "gsc.h"
 #include "gsc_functions.h"
 #include "image_loader.h"
+#include "lobby_bots.h"
 #include "mpsp.h"
 #include "mods.h"
 #include "pm.h"
@@ -52,11 +53,13 @@ const EventHandler delayStreamLoadHandlers[] = {
 const EventHandler vmShutdownHandlers[] = {
     GSC::OnVMShutdown,
     GSCFunctions::OnVMShutdown,
+    LobbyBots::OnVMShutdown,
     sv_bots::OnVMShutdown,
 };
 
 const EventHandler dvarInitHandlers[] = {
-    cg::OnDvarInit, cj_tas::OnDvarInit, clipmap::OnDvarInit, ModList::OnDvarInit, pm::OnDvarInit, UIFeeder::OnDvarInit,
+    cg::OnDvarInit,      cj_tas::OnDvarInit, clipmap::OnDvarInit,  LobbyBots::OnDvarInit,
+    ModList::OnDvarInit, pm::OnDvarInit,     UIFeeder::OnDvarInit,
 };
 
 const EventHandler cmdInitHandlers[] = {
@@ -72,6 +75,7 @@ void Events::CG_DrawActive_Hook(int localClientNum)
 {
     // Call original function first
     CG_DrawActive_Detour.GetOriginal<decltype(&CG_DrawActive_Hook)>()(localClientNum);
+    LobbyBots::OnFrame(localClientNum);
 
     for (size_t i = 0; i < ARRAYSIZE(cgDrawActiveHandlers); ++i)
     {
@@ -151,6 +155,7 @@ Detour Events::Cmd_Init_Detour;
 void Events::UI_Refresh_Hook(int localClientNum)
 {
     UI_Refresh_Detour.GetOriginal<decltype(UI_Refresh)>()(localClientNum);
+    LobbyBots::OnUIRefresh(localClientNum);
 
     for (size_t i = 0; i < ARRAYSIZE(uiRefreshHandlers); ++i)
     {

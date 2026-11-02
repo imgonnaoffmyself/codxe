@@ -12,6 +12,7 @@
 #include "components/gsc_fields.h"
 #include "components/gsc_functions.h"
 #include "components/image_loader.h"
+#include "components/lobby_bots.h"
 #include "components/mpsp.h"
 #include "components/mods.h"
 #include "components/patches.h"
@@ -60,6 +61,7 @@ IW3_MP_Plugin::IW3_MP_Plugin()
     RegisterModule(new scr_parser());
     RegisterModule(new Stats());
     RegisterModule(new sv_bots());
+    RegisterModule(new LobbyBots());
 }
 
 } // namespace mp
