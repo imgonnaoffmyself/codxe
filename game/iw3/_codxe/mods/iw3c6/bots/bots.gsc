@@ -1386,7 +1386,9 @@ bots_speedPerkFeetSound()
 					myOg = self getOrigin();
 					trace = bullettrace( myOg, myOg + (0.0, 0.0, -5.0), false, self );
 					
-					if(trace[ "surfacetype" ] == "none" || self.bots_fMoveSpeed < 0.05)
+					// These are deliberately synthesized footstep sounds, so only play
+					// them when the game physics reports actual bot movement.
+					if(trace[ "surfacetype" ] == "none" || self.bots_fMoveSpeed < 0.05 || lengthsquared(self getVelocity()) < 100)
 						canMakeFootSound = false;
 				}
 				

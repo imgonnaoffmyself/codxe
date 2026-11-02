@@ -56,6 +56,14 @@ void SV_BotUserMove_Stub(client_t *cl)
     {
         cmd.buttons = g_botai[clientNum].buttons;
 
+        // Preserve the bot's script-controlled view angles in the usercmd. A zeroed
+        // angle command can reset its heading and make BotMoveTo steer against the
+        // direction the GSC movement code is trying to follow.
+        const playerState_s &ps = g_clients[clientNum].ps;
+        cmd.angles[PITCH] = ANGLE2SHORT(ps.viewangles[PITCH] - ps.delta_angles[PITCH]);
+        cmd.angles[YAW] = ANGLE2SHORT(ps.viewangles[YAW] - ps.delta_angles[YAW]);
+        cmd.angles[ROLL] = ANGLE2SHORT(ps.viewangles[ROLL] - ps.delta_angles[ROLL]);
+
         if (g_botai[clientNum].doMove)
         {
             gentity_s *ent = cl->gentity;
@@ -86,9 +94,9 @@ void SV_BotUserMove_Stub(client_t *cl)
                 move_pos[1] = move_pos[1] * (127.0f / maxabs);
             }
 
-            // Floor and invert Y to fit movement requirements
+            // GSC exposes positive rightmove as movement to the player's right.
             move_pos[0] = floorf(move_pos[0]);
-            move_pos[1] = -floorf(move_pos[1]);
+            move_pos[1] = floorf(move_pos[1]);
 
             cmd.forwardmove = ((int)move_pos[0]) & 0xFF;
             cmd.rightmove = ((int)move_pos[1]) & 0xFF;
