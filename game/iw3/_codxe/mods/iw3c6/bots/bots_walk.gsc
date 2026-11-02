@@ -1811,21 +1811,37 @@ bots_Move(vMoveTarget, climbing)
 			self notify( "BotMovementComplete" );
 		}
 
-		// botMoveTo feeds the server's usercmd movement path, preserving collision and physics.
-		// It reports "movedone" when the horizontal destination has been reached.
 		if(climbing)
 			moveTarget = vMoveTarget;
 		else
 			moveTarget = (vMoveTarget[0], vMoveTarget[1], self.origin[2]);
-		self botMoveTo(moveTarget);
-		self waittill("movedone");
-		
-		// Climb waypoints can share an XY position but differ in height. Keep the
-		// climb input active until the player has physically reached the waypoint.
-		if(!climbing || DistanceSquared(vMoveTarget, self.origin) <= 1024)
+
+		// Keep botMoveTo active for normal usercmd movement, but also drive physical
+		// velocity through CoD Xe's SetVelocity method. This avoids relying on bot
+		// client input being consumed for locomotion while retaining collision physics.
+		moveDelta = (moveTarget[0] - self.origin[0], moveTarget[1] - self.origin[1], 0);
+		moveDistanceSquared = lengthsquared(moveDelta);
+		if(moveDistanceSquared <= 49 && (!climbing || DistanceSquared(vMoveTarget, self.origin) <= 1024))
 		{
+			velocity = self getVelocity();
+			self SetVelocity((0, 0, velocity[2]));
 			self botStop();
 			self notify( "BotMovementComplete" );
+		}
+		else
+		{
+			if(moveDistanceSquared > 49)
+				moveDirection = VectorNormalize(moveDelta);
+			else
+			{
+				// When climbing a nearly vertical waypoint, continue toward the ladder.
+				forward = anglesToForward(self getPlayerAngles());
+				moveDirection = VectorNormalize((forward[0], forward[1], 0));
+			}
+			self botMoveTo(moveTarget);
+			velocity = self getVelocity();
+			moveSpeed = self.bots_fMoveSpeed * 20;
+			self SetVelocity((moveDirection[0] * moveSpeed, moveDirection[1] * moveSpeed, velocity[2]));
 		}
 		wait 0.05;
 	}
