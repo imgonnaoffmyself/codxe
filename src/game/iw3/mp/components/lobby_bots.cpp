@@ -178,12 +178,9 @@ void UpdateLocalVetoStatus()
     }
 }
 
-bool IsPublicGameHostDvars()
+bool IsEligibleOnlineGameDvars()
 {
-    // onlinegameandhost alone includes party contexts; exclude the console's private-party roles explicitly.
-    return GetDvarBoolSafe("onlinegame") && GetDvarBoolSafe("onlinegameandhost") &&
-           !GetDvarBoolSafe("xblive_privatematch") && !GetDvarBoolSafe("xblive_hostingprivateparty") &&
-           !GetDvarBoolSafe("xblive_privatepartyclient");
+    return GetDvarBoolSafe("onlinegame") && !GetDvarBoolSafe("xblive_privatematch");
 }
 
 bool IsPublicHostContext(int localClientNum)
@@ -191,7 +188,7 @@ bool IsPublicHostContext(int localClientNum)
     if (localClientNum < 0 || localClientNum >= 4 || !uiInfoArray[localClientNum])
         return false;
 
-    return IsPublicGameHostDvars() && IsLobbyMenuAssetOpen(localClientNum);
+    return IsEligibleOnlineGameDvars() && IsLobbyMenuAssetOpen(localClientNum);
 }
 
 bool IsServerRunning()
@@ -426,7 +423,7 @@ void UpdateForCurrentState(DWORD now, int localClientNum)
     {
         if (s_lobbySimulationActive && !s_matchActive)
         {
-            if (!IsPublicGameHostDvars())
+            if (!IsEligibleOnlineGameDvars())
             {
                 ResetLobbyState();
                 return;
