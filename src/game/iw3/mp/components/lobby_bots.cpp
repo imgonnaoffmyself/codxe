@@ -88,8 +88,8 @@ void SetBoolDvar(dvar_s *dvar, bool value)
 
 bool IsPublicHostContext()
 {
-    // inlobby + onlinegameandhost targets the matchmaking lobby, not the party-host screen/state.
-    return GetDvarBoolSafe("onlinegame") && GetDvarBoolSafe("onlinegameandhost") && GetDvarBoolSafe("inlobby") &&
+    // onlinegameandhost is the engine's Xbox Live game-host check; party_host is a separate party-session flag.
+    return GetDvarBoolSafe("onlinegame") && GetDvarBoolSafe("onlinegameandhost") &&
            !GetDvarBoolSafe("xblive_privatematch");
 }
 
