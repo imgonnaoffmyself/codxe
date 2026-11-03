@@ -165,7 +165,7 @@ float RandomFloat(float minValue, float maxValue)
 DWORD GetArrivalDelayMs()
 {
     const int population = s_lobbyPlayerCount + static_cast<int>(s_lobbyBots.size());
-    const float progress = std::min(1.0f, std::max(0.0f, (population - 1) / 7.0f));
+    const float progress = (std::min)(1.0f, (std::max)(0.0f, (population - 1) / 7.0f));
     const float minDelay = 5.0f + (0.33f - 5.0f) * progress;
     const float maxDelay = 30.0f + (2.5f - 30.0f) * progress;
     return static_cast<DWORD>(RandomFloat(minDelay, maxDelay) * 1000.0f);
@@ -173,16 +173,16 @@ DWORD GetArrivalDelayMs()
 
 int GetAvailableBotSlots()
 {
-    return std::max(0, std::min(MAX_CLIENTS, s_lobbyMaxPlayers) - s_lobbyPlayerCount);
+    return (std::max)(0, (std::min)(MAX_CLIENTS, s_lobbyMaxPlayers) - s_lobbyPlayerCount);
 }
 
 void UpdateLobbyCounts()
 {
-    s_lobbyPlayerCount = std::max(1, ParseFirstInteger(GetDvarStringSafe("party_lobbyPlayerCount"), 1));
+    s_lobbyPlayerCount = (std::max)(1, ParseFirstInteger(GetDvarStringSafe("party_lobbyPlayerCount"), 1));
     s_lobbyMaxPlayers = GetDvarIntSafe("party_maxplayers", MAX_CLIENTS);
     if (s_lobbyMaxPlayers <= 0)
         s_lobbyMaxPlayers = MAX_CLIENTS;
-    s_lobbyMaxPlayers = std::min(s_lobbyMaxPlayers, MAX_CLIENTS);
+    s_lobbyMaxPlayers = (std::min)(s_lobbyMaxPlayers, MAX_CLIENTS);
 }
 
 void SetTargetBotCount()
