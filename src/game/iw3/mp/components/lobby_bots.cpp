@@ -397,8 +397,13 @@ void UpdateForCurrentState(DWORD now)
 }
 } // namespace
 
-LobbyBots::LobbyBots() = default;
-LobbyBots::~LobbyBots() = default;
+LobbyBots::LobbyBots()
+{
+}
+
+LobbyBots::~LobbyBots()
+{
+}
 
 void LobbyBots::OnDvarInit()
 {
