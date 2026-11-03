@@ -16,6 +16,7 @@ class LobbyBots : public Module
     static void OnUIRefresh(int localClientNum);
     static void OnFrame(int localClientNum);
     static void OnVMShutdown();
+    static void OnMenuAssetOpened(UiContext *dc, const char *menuName);
 
     static bool IsLobbyUiActive(int localClientNum);
     static int GetLobbyHumanCount();

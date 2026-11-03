@@ -39,6 +39,28 @@ bool s_lobbySimulationActive = false;
 bool s_matchActive = false;
 bool s_vetoActive = false;
 bool s_randomSeeded = false;
+menuDef_t *s_lobbyMenuAssets[4] = {nullptr, nullptr, nullptr, nullptr};
+
+bool IsLobbyMenuAssetOpen(int localClientNum)
+{
+    if (localClientNum < 0 || localClientNum >= 4 || !uiInfoArray[localClientNum] ||
+        !s_lobbyMenuAssets[localClientNum])
+    {
+        return false;
+    }
+
+    const UiContext &context = uiInfoArray[localClientNum]->uiDC;
+    if (context.openMenuCount <= 0 || context.openMenuCount > static_cast<int>(ARRAYSIZE(context.menuStack)))
+        return false;
+
+    for (int i = 0; i < context.openMenuCount; ++i)
+    {
+        if (context.menuStack[i] == s_lobbyMenuAssets[localClientNum])
+            return true;
+    }
+
+    return false;
+}
 
 void UpdateBotDisplayName(LobbyBot &bot)
 {
@@ -169,7 +191,7 @@ bool IsPublicHostContext(int localClientNum)
     if (localClientNum < 0 || localClientNum >= 4 || !uiInfoArray[localClientNum])
         return false;
 
-    return IsPublicGameHostDvars() && uiInfoArray[localClientNum]->currentMenuType == UIMENU_GAMELOBBY;
+    return IsPublicGameHostDvars() && IsLobbyMenuAssetOpen(localClientNum);
 }
 
 bool IsServerRunning()
@@ -448,6 +470,29 @@ LobbyBots::LobbyBots()
 
 LobbyBots::~LobbyBots()
 {
+}
+
+void LobbyBots::OnMenuAssetOpened(UiContext *dc, const char *menuName)
+{
+    if (!dc || !menuName || I_stricmp(menuName, "menu_xboxlive_lobby") != 0)
+        return;
+
+    const int localClientNum = dc->localClientNum;
+    if (localClientNum < 0 || localClientNum >= 4 || dc->openMenuCount <= 0 ||
+        dc->openMenuCount > static_cast<int>(ARRAYSIZE(dc->menuStack)))
+    {
+        return;
+    }
+
+    if (s_lobbyMenuAssets[localClientNum] && IsLobbyMenuAssetOpen(localClientNum))
+        return;
+
+    menuDef_t *menu = dc->menuStack[dc->openMenuCount - 1];
+    if (menu)
+    {
+        s_lobbyMenuAssets[localClientNum] = menu;
+        DbgPrint("[codxe][IW3][LobbyBots] Tracking menu_xboxlive_lobby for local client %d\n", localClientNum);
+    }
 }
 
 void LobbyBots::OnDvarInit()

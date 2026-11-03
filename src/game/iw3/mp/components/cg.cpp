@@ -2,6 +2,7 @@
 #include "cj_tas.h"
 #include "cg.h"
 #include "mods.h"
+#include "lobby_bots.h"
 
 namespace iw3
 {
@@ -118,6 +119,8 @@ void Menus_OpenByName_Hook(UiContext *dc, const char *menuName)
         Menus_OpenByName_Detour.GetOriginal<decltype(Menus_OpenByName)>()(dc, "settings_map");
     else
         Menus_OpenByName_Detour.GetOriginal<decltype(Menus_OpenByName)>()(dc, menuName);
+
+    LobbyBots::OnMenuAssetOpened(dc, menuName);
 }
 
 static const float colorWhiteRGBA[4] = {1.0f, 1.0f, 1.0f, 1.0f};
