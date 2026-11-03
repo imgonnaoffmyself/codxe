@@ -15,6 +15,7 @@ class UIFeeder : public Module
     static void Add(float feederID, UIFeederGetItemCount_t getItemCount, UIFeederGetItemText_t getItemText,
                     UIFeederSelect_t select);
     static void SetSelectedIndex(float feederID, int index);
+    static void ResetLobbyBotFeeder();
     static void OnDvarInit();
 
   private:

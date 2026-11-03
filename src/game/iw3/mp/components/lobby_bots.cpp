@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "lobby_bots.h"
+#include "ui_feeder.h"
 
 #include <cstdlib>
 
@@ -12,6 +13,7 @@ namespace
 struct LobbyBot
 {
     std::string name;
+    std::string displayName;
     int vetoVote;
 };
 
@@ -22,6 +24,8 @@ const DWORD POST_MATCH_LOBBY_GRACE_MS = 60000;
 
 std::vector<LobbyBot> s_lobbyBots;
 std::vector<std::string> s_botNamePool;
+std::string s_vetoStatusBase;
+std::string s_vetoStatusLastWritten;
 dvar_s *s_lobbyBotsEnabled = nullptr;
 dvar_s *s_lobbyBotsTarget = nullptr;
 DWORD s_nextArrivalTime = 0;
@@ -31,10 +35,24 @@ DWORD s_postMatchGraceDeadline = 0;
 int s_lobbyPlayerCount = 1;
 int s_previousLobbyPlayerCount = 1;
 int s_lobbyMaxPlayers = MAX_CLIENTS;
-bool s_lobbySessionActive = false;
+bool s_lobbySimulationActive = false;
 bool s_matchActive = false;
 bool s_vetoActive = false;
 bool s_randomSeeded = false;
+
+void UpdateBotDisplayName(LobbyBot &bot)
+{
+    if (bot.vetoVote < 0)
+    {
+        bot.displayName = bot.name;
+        return;
+    }
+
+    char displayName[64];
+    _snprintf_s(displayName, ARRAYSIZE(displayName), _TRUNCATE, "%s ^7[%s]", bot.name.c_str(),
+                bot.vetoVote ? "SKIP" : "KEEP");
+    bot.displayName = displayName;
+}
 
 bool GetDvarBoolSafe(const char *name)
 {
@@ -86,11 +104,72 @@ void SetBoolDvar(dvar_s *dvar, bool value)
     Dvar_SetStringFromSource(dvar, value ? "1" : "0", DVAR_SOURCE_INTERNAL);
 }
 
-bool IsPublicHostContext()
+void RestoreLocalVetoStatus()
 {
-    // onlinegameandhost is the engine's Xbox Live game-host check; party_host is a separate party-session flag.
+    if (s_vetoStatusLastWritten.empty())
+        return;
+
+    dvar_s *dvar = Dvar_FindMalleableVar("party_vetoStatus");
+    if (dvar && dvar->current.string && !(dvar->flags & DVAR_CODINFO) &&
+        s_vetoStatusLastWritten == dvar->current.string)
+    {
+        Dvar_SetStringFromSource(dvar, s_vetoStatusBase.c_str(), DVAR_SOURCE_INTERNAL);
+    }
+
+    s_vetoStatusBase.clear();
+    s_vetoStatusLastWritten.clear();
+}
+
+void UpdateLocalVetoStatus()
+{
+    dvar_s *dvar = Dvar_FindMalleableVar("party_vetoStatus");
+    if (!dvar || !dvar->current.string || (dvar->flags & DVAR_CODINFO))
+        return;
+
+    if (!GetDvarBoolSafe("party_vetoButtonVisible") || !s_vetoActive)
+    {
+        RestoreLocalVetoStatus();
+        return;
+    }
+
+    const std::string current = dvar->current.string;
+    if (s_vetoStatusLastWritten.empty() || current != s_vetoStatusLastWritten)
+        s_vetoStatusBase = current;
+
+    int skipVotes = 0;
+    int keepVotes = 0;
+    for (size_t i = 0; i < s_lobbyBots.size(); ++i)
+    {
+        if (s_lobbyBots[i].vetoVote == 1)
+            ++skipVotes;
+        else if (s_lobbyBots[i].vetoVote == 0)
+            ++keepVotes;
+    }
+
+    char display[256];
+    _snprintf_s(display, ARRAYSIZE(display), _TRUNCATE, "%s  (local simulated bots: %d skip, %d keep)",
+                s_vetoStatusBase.c_str(), skipVotes, keepVotes);
+    if (current != display)
+    {
+        Dvar_SetStringFromSource(dvar, display, DVAR_SOURCE_INTERNAL);
+        s_vetoStatusLastWritten = display;
+    }
+}
+
+bool IsPublicGameHostDvars()
+{
+    // onlinegameandhost alone includes party contexts; exclude the console's private-party roles explicitly.
     return GetDvarBoolSafe("onlinegame") && GetDvarBoolSafe("onlinegameandhost") &&
-           !GetDvarBoolSafe("xblive_privatematch");
+           !GetDvarBoolSafe("xblive_privatematch") && !GetDvarBoolSafe("xblive_hostingprivateparty") &&
+           !GetDvarBoolSafe("xblive_privatepartyclient");
+}
+
+bool IsPublicHostContext(int localClientNum)
+{
+    if (localClientNum < 0 || localClientNum >= 4 || !uiInfoArray[localClientNum])
+        return false;
+
+    return IsPublicGameHostDvars() && uiInfoArray[localClientNum]->currentMenuType == UIMENU_GAMELOBBY;
 }
 
 bool IsServerRunning()
@@ -192,14 +271,16 @@ void SetTargetBotCount()
 
 void ResetLobbyState()
 {
-    const bool hadState = s_lobbySessionActive || s_matchActive || s_postMatchGraceDeadline != 0 ||
-                          !s_lobbyBots.empty() || GetDvarBoolSafe(LOBBY_BOTS_ENABLED_DVAR) ||
-                          GetDvarIntSafe(LOBBY_BOTS_TARGET_DVAR, 0) != 0;
+    const bool hadState = s_lobbySimulationActive || s_matchActive || s_postMatchGraceDeadline != 0 ||
+                          !s_lobbyBots.empty() || !s_vetoStatusLastWritten.empty() ||
+                          GetDvarBoolSafe(LOBBY_BOTS_ENABLED_DVAR) || GetDvarIntSafe(LOBBY_BOTS_TARGET_DVAR, 0) != 0;
     if (!hadState)
         return;
 
+    RestoreLocalVetoStatus();
     s_lobbyBots.clear();
-    s_lobbySessionActive = false;
+    UIFeeder::ResetLobbyBotFeeder();
+    s_lobbySimulationActive = false;
     s_matchActive = false;
     s_vetoActive = false;
     s_nextArrivalTime = 0;
@@ -219,10 +300,11 @@ void BeginLobbyState(DWORD now)
     }
 
     s_lobbyBots.clear();
-    s_lobbySessionActive = true;
+    s_lobbySimulationActive = true;
     s_matchActive = false;
     s_vetoActive = false;
     s_postMatchGraceDeadline = 0;
+    RestoreLocalVetoStatus();
     UpdateLobbyCounts();
     s_previousLobbyPlayerCount = s_lobbyPlayerCount;
     s_nextLeaveCheckTime = now + LOBBY_BOT_LEAVE_CHECK_MS;
@@ -236,7 +318,10 @@ void SetBotVoteState(bool active)
     if (!active)
     {
         for (size_t i = 0; i < s_lobbyBots.size(); ++i)
+        {
             s_lobbyBots[i].vetoVote = -1;
+            UpdateBotDisplayName(s_lobbyBots[i]);
+        }
         s_vetoActive = false;
         return;
     }
@@ -244,7 +329,10 @@ void SetBotVoteState(bool active)
     if (!s_vetoActive)
     {
         for (size_t i = 0; i < s_lobbyBots.size(); ++i)
+        {
             s_lobbyBots[i].vetoVote = rand() & 1;
+            UpdateBotDisplayName(s_lobbyBots[i]);
+        }
         s_vetoActive = true;
     }
 }
@@ -254,6 +342,7 @@ void AddLobbyBot()
     LobbyBot bot;
     bot.name = NextBotName();
     bot.vetoVote = s_vetoActive ? (rand() & 1) : -1;
+    UpdateBotDisplayName(bot);
     s_lobbyBots.push_back(bot);
 }
 
@@ -302,54 +391,10 @@ void UpdateLobbySimulation(DWORD now)
     }
 
     SetTargetBotCount();
+    UpdateLocalVetoStatus();
 }
 
-void DrawLobbyOverlay()
-{
-    if (!sharedUiInfo || !sharedUiInfo->assets.consoleFont)
-        return;
-
-    int yesVotes = 0;
-    int noVotes = 0;
-    for (size_t i = 0; i < s_lobbyBots.size(); ++i)
-    {
-        if (s_lobbyBots[i].vetoVote == 1)
-            ++yesVotes;
-        else if (s_lobbyBots[i].vetoVote == 0)
-            ++noVotes;
-    }
-
-    char overlay[1024];
-    int used = _snprintf_s(overlay, ARRAYSIZE(overlay), _TRUNCATE,
-                           "^2CoD Xe local lobby simulation^7\nPlayers: %d / %d   Simulated bots: %u\n",
-                           s_lobbyPlayerCount, s_lobbyMaxPlayers, static_cast<unsigned int>(s_lobbyBots.size()));
-    if (used < 0)
-        return;
-
-    if (s_vetoActive)
-    {
-        used += _snprintf_s(overlay + used, ARRAYSIZE(overlay) - used, _TRUNCATE,
-                            "Local simulated veto votes: ^2%d yes^7 / ^1%d no^7\n", yesVotes, noVotes);
-    }
-    else
-    {
-        used += _snprintf_s(overlay + used, ARRAYSIZE(overlay) - used, _TRUNCATE,
-                            "Local simulated veto votes: waiting for map vote\n");
-    }
-
-    for (size_t i = 0; i < s_lobbyBots.size() && i < 12 && used > 0 && used < static_cast<int>(ARRAYSIZE(overlay)); ++i)
-    {
-        const char *vote = s_lobbyBots[i].vetoVote < 0 ? "" : (s_lobbyBots[i].vetoVote ? " (yes)" : " (no)");
-        used += _snprintf_s(overlay + used, ARRAYSIZE(overlay) - used, _TRUNCATE, "  %s%s\n",
-                            s_lobbyBots[i].name.c_str(), vote);
-    }
-
-    const float color[4] = {1.0f, 1.0f, 1.0f, 0.95f};
-    R_AddCmdDrawText(overlay, ARRAYSIZE(overlay), sharedUiInfo->assets.consoleFont, 18.0, 235.0, 0.85, 0.85, 0.0, color,
-                     0);
-}
-
-void UpdateForCurrentState(DWORD now)
+void UpdateForCurrentState(DWORD now, int localClientNum)
 {
     if (static_cast<LONG>(now - s_lastStateUpdateTime) < 100)
         return;
@@ -357,15 +402,15 @@ void UpdateForCurrentState(DWORD now)
 
     if (IsServerRunning())
     {
-        if (s_lobbySessionActive && !s_matchActive)
+        if (s_lobbySimulationActive && !s_matchActive)
         {
-            if (s_postMatchGraceDeadline && (!GetDvarBoolSafe("onlinegame") || !GetDvarBoolSafe("onlinegameandhost") ||
-                                             GetDvarBoolSafe("xblive_privatematch")))
+            if (!IsPublicGameHostDvars())
             {
                 ResetLobbyState();
                 return;
             }
 
+            RestoreLocalVetoStatus();
             s_matchActive = true;
             s_postMatchGraceDeadline = 0;
             SetTargetBotCount();
@@ -373,9 +418,9 @@ void UpdateForCurrentState(DWORD now)
         return;
     }
 
-    if (!IsPublicHostContext())
+    if (!IsPublicHostContext(localClientNum))
     {
-        if (s_lobbySessionActive && s_matchActive)
+        if (s_lobbySimulationActive && s_matchActive)
         {
             s_matchActive = false;
             s_postMatchGraceDeadline = now + POST_MATCH_LOBBY_GRACE_MS;
@@ -390,7 +435,7 @@ void UpdateForCurrentState(DWORD now)
     }
 
     s_postMatchGraceDeadline = 0;
-    if (!s_lobbySessionActive)
+    if (!s_lobbySimulationActive)
         BeginLobbyState(now);
 
     UpdateLobbySimulation(now);
@@ -418,22 +463,18 @@ void LobbyBots::OnUIRefresh(int localClientNum)
     if (localClientNum != 0)
         return;
 
-    const DWORD now = GetTickCount();
-    UpdateForCurrentState(now);
-
-    if (s_lobbySessionActive && !IsServerRunning() && IsPublicHostContext())
-        DrawLobbyOverlay();
+    UpdateForCurrentState(GetTickCount(), localClientNum);
 }
 
 void LobbyBots::OnFrame(int localClientNum)
 {
     if (localClientNum == 0)
-        UpdateForCurrentState(GetTickCount());
+        UpdateForCurrentState(GetTickCount(), localClientNum);
 }
 
 void LobbyBots::OnVMShutdown()
 {
-    if (!s_lobbySessionActive || !s_matchActive || !svsHeader || !svsHeader->clients)
+    if (!s_lobbySimulationActive || !s_matchActive || !svsHeader || !svsHeader->clients)
         return;
 
     std::vector<LobbyBot> actualRoster;
@@ -449,11 +490,42 @@ void LobbyBots::OnVMShutdown()
         LobbyBot bot;
         bot.name = client.name[0] ? client.name : "CodXe Bot";
         bot.vetoVote = -1;
+        UpdateBotDisplayName(bot);
         actualRoster.push_back(bot);
     }
 
     s_lobbyBots.swap(actualRoster);
     SetTargetBotCount();
+}
+
+bool LobbyBots::IsLobbyUiActive(int localClientNum)
+{
+    return s_lobbySimulationActive && !s_matchActive && !IsServerRunning() && IsPublicHostContext(localClientNum);
+}
+
+int LobbyBots::GetLobbyHumanCount()
+{
+    return s_lobbyPlayerCount;
+}
+
+int LobbyBots::GetLobbyBotCount()
+{
+    return static_cast<int>(s_lobbyBots.size());
+}
+
+const char *LobbyBots::GetLobbyBotDisplayName(int index)
+{
+    if (index < 0 || index >= static_cast<int>(s_lobbyBots.size()))
+        return "";
+
+    return s_lobbyBots[static_cast<size_t>(index)].displayName.c_str();
+}
+
+int LobbyBots::GetLobbyBotVote(int index)
+{
+    if (index < 0 || index >= static_cast<int>(s_lobbyBots.size()))
+        return -1;
+    return s_lobbyBots[static_cast<size_t>(index)].vetoVote;
 }
 } // namespace mp
 } // namespace iw3

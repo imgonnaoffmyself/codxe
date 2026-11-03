@@ -2,6 +2,7 @@
 #include "ui_feeder.h"
 
 #include "fastfiles.h"
+#include "lobby_bots.h"
 
 namespace iw3
 {
@@ -22,6 +23,39 @@ std::vector<FeederEntry> usermaps;
 int selectedUsermap = 0;
 bool usermapsScanned = false;
 dvar_s *ui_codxe_usermap_counter = NULL;
+float lobbyRosterFeederID = -1.0f;
+int lobbyRosterNameColumn = -1;
+int lobbyRosterHumanCount = 0;
+DWORD nextLobbyRosterProbeTime = 0;
+
+bool ContainsHostName(const char *text, const char *hostName)
+{
+    if (!text || !hostName || !*hostName)
+        return false;
+
+    const size_t hostNameLength = strlen(hostName);
+    for (const char *candidate = text; *candidate; ++candidate)
+    {
+        if (_strnicmp(candidate, hostName, static_cast<int>(hostNameLength)) == 0)
+            return true;
+    }
+
+    return false;
+}
+
+bool IsLobbyRosterBotRow(float feederID, int index, int *botIndex)
+{
+    if (feederID != lobbyRosterFeederID || index < lobbyRosterHumanCount)
+        return false;
+
+    const int candidateIndex = index - lobbyRosterHumanCount;
+    if (candidateIndex < 0 || candidateIndex >= LobbyBots::GetLobbyBotCount())
+        return false;
+
+    if (botIndex)
+        *botIndex = candidateIndex;
+    return true;
+}
 
 std::string ReadDisplayName(const std::string &descriptionPath, const std::string &fallback)
 {
@@ -216,6 +250,14 @@ void UIFeeder::SetSelectedIndex(float feederID, int index)
     SelectedIndices[feederID] = index;
 }
 
+void UIFeeder::ResetLobbyBotFeeder()
+{
+    lobbyRosterFeederID = -1.0f;
+    lobbyRosterNameColumn = -1;
+    lobbyRosterHumanCount = 0;
+    nextLobbyRosterProbeTime = 0;
+}
+
 void UIFeeder::OnDvarInit()
 {
     ui_codxe_usermap_counter =
@@ -225,23 +267,71 @@ void UIFeeder::OnDvarInit()
 int UIFeeder::UI_FeederCount_Hook(int localClientNum, itemDef_s *item, float feederID)
 {
     const std::map<float, UIFeederCallbacks>::const_iterator feeder = Feeders.find(feederID);
-    if (feeder == Feeders.end())
-        return UI_FeederCount_Detour.GetOriginal<UI_FeederCount_t>()(localClientNum, item, feederID);
-
-    const int count = feeder->second.getItemCount();
-    if (item && localClientNum >= 0 && localClientNum < 4)
+    if (feeder != Feeders.end())
     {
-        int index = SelectedIndices[feederID];
-        if (index < 0 || index >= count)
+        const int count = feeder->second.getItemCount();
+        if (item && localClientNum >= 0 && localClientNum < 4)
         {
-            index = 0;
-            SetSelectedIndex(feederID, index);
+            int index = SelectedIndices[feederID];
+            if (index < 0 || index >= count)
+            {
+                index = 0;
+                SetSelectedIndex(feederID, index);
+            }
+
+            item->cursorPos[localClientNum] = index;
         }
 
-        item->cursorPos[localClientNum] = index;
+        return count;
     }
 
-    return count;
+    const int nativeCount = UI_FeederCount_Detour.GetOriginal<UI_FeederCount_t>()(localClientNum, item, feederID);
+    if (!LobbyBots::IsLobbyUiActive(localClientNum))
+    {
+        ResetLobbyBotFeeder();
+        return nativeCount;
+    }
+
+    if (feederID == lobbyRosterFeederID)
+    {
+        lobbyRosterHumanCount = nativeCount;
+        return nativeCount + LobbyBots::GetLobbyBotCount();
+    }
+
+    if (!item || nativeCount <= 0 || nativeCount > MAX_CLIENTS || nativeCount != LobbyBots::GetLobbyHumanCount())
+    {
+        return nativeCount;
+    }
+
+    const DWORD now = GetTickCount();
+    if (nextLobbyRosterProbeTime && static_cast<LONG>(now - nextLobbyRosterProbeTime) < 0)
+        return nativeCount;
+    nextLobbyRosterProbeTime = now + 500;
+
+    const char *hostName = Dvar_GetString("party_hostname");
+    if (!hostName || !*hostName)
+        return nativeCount;
+
+    for (unsigned int column = 0; column <= FEEDER_ACTION_COLUMN; ++column)
+    {
+        for (int index = 0; index < nativeCount; ++index)
+        {
+            Material *handle = NULL;
+            const char *text = UI_FeederItemText_Detour.GetOriginal<UI_FeederItemText_t>()(
+                localClientNum, item, feederID, index, column, &handle);
+            if (!ContainsHostName(text, hostName))
+                continue;
+
+            lobbyRosterFeederID = feederID;
+            lobbyRosterNameColumn = static_cast<int>(column);
+            lobbyRosterHumanCount = nativeCount;
+            DbgPrint("[codxe][IW3][LobbyBots] Attached %u local lobby bot(s) to feeder %.1f\n",
+                     static_cast<unsigned int>(LobbyBots::GetLobbyBotCount()), feederID);
+            return nativeCount + LobbyBots::GetLobbyBotCount();
+        }
+    }
+
+    return nativeCount;
 }
 
 const char *UIFeeder::UI_FeederItemText_Hook(int localClientNum, itemDef_s *item, float feederID, int index,
@@ -250,6 +340,14 @@ const char *UIFeeder::UI_FeederItemText_Hook(int localClientNum, itemDef_s *item
     const std::map<float, UIFeederCallbacks>::const_iterator feeder = Feeders.find(feederID);
     if (feeder == Feeders.end())
     {
+        int botIndex = -1;
+        if (LobbyBots::IsLobbyUiActive(localClientNum) && IsLobbyRosterBotRow(feederID, index, &botIndex))
+        {
+            if (handle)
+                *handle = NULL;
+            return static_cast<int>(column) == lobbyRosterNameColumn ? LobbyBots::GetLobbyBotDisplayName(botIndex) : "";
+        }
+
         return UI_FeederItemText_Detour.GetOriginal<UI_FeederItemText_t>()(localClientNum, item, feederID, index,
                                                                            column, handle);
     }
@@ -277,6 +375,17 @@ const char *UIFeeder::UI_FeederItemText_Hook(int localClientNum, itemDef_s *item
 void UIFeeder::UI_FeederItemColor_Hook(int localClientNum, itemDef_s *item, float feederID, int index, int column,
                                        float *color)
 {
+    int botIndex = -1;
+    if (LobbyBots::IsLobbyUiActive(localClientNum) && IsLobbyRosterBotRow(feederID, index, &botIndex))
+    {
+        const int vote = LobbyBots::GetLobbyBotVote(botIndex);
+        color[0] = vote == 1 && column == lobbyRosterNameColumn ? 0.35f : 1.0f;
+        color[1] = vote == 0 && column == lobbyRosterNameColumn ? 0.35f : 1.0f;
+        color[2] = 1.0f;
+        color[3] = 0.95f;
+        return;
+    }
+
     if (Feeders.find(feederID) != Feeders.end())
     {
         if (column == FEEDER_BACKGROUND_COLUMN || column == FEEDER_BACKGROUND_END_COLUMN)
@@ -303,6 +412,9 @@ void UIFeeder::UI_FeederItemColor_Hook(int localClientNum, itemDef_s *item, floa
 
 void UIFeeder::UI_FeederSelection_Hook(int localClientNum, float feederID, itemDef_s *item, int index)
 {
+    if (LobbyBots::IsLobbyUiActive(localClientNum) && IsLobbyRosterBotRow(feederID, index, NULL))
+        return;
+
     const std::map<float, UIFeederCallbacks>::const_iterator feeder = Feeders.find(feederID);
     if (feeder == Feeders.end())
     {
@@ -366,6 +478,7 @@ UIFeeder::~UIFeeder()
     UI_FeederItemText_Detour.Remove();
     UI_FeederItemColor_Detour.Remove();
     UI_FeederCount_Detour.Remove();
+    ResetLobbyBotFeeder();
     SelectedIndices.clear();
     Feeders.clear();
 }
